@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>NDSP All Stock AI Pro Analyzer</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        body {
+            margin: 0;
+            font-family: 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #0f2027, #203a43, #2c5364);
+            color: white;
+            text-align: center;
+        }
+
+        h1 {
+            margin-top: 30px;
+            font-size: 40px;
+            background: linear-gradient(45deg, #00ffcc, #00aaff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        input {
+            padding: 12px;
+            width: 250px;
+            border-radius: 8px;
+            border: none;
+            font-size: 16px;
+        }
+
+        button {
+            padding: 12px 20px;
+            border-radius: 8px;
+            border: none;
+            font-weight: bold;
+            cursor: pointer;
+            margin: 5px;
+        }
+
+        .analyzeBtn { background:#00ffcc; }
+
+        .upBtn { background:#00ff88; color:black; }
+        .downBtn { background:#ff4c4c; color:white; }
+
+        .card {
+            margin: 30px auto;
+            padding: 25px;
+            width: 600px;
+            border-radius: 15px;
+            background: rgba(255,255,255,0.05);
+            backdrop-filter: blur(10px);
+            box-shadow: 0 0 20px rgba(0,255,255,0.4);
+        }
+
+        .bar {
+            background:#333;
+            height:12px;
+            border-radius:6px;
+        }
+
+        .fillBuy {
+            background:#00ff88;
+            height:12px;
+            border-radius:6px;
+        }
+
+        .fillSell {
+            background:#ff4c4c;
+            height:12px;
+            border-radius:6px;
+        }
+
+        canvas {
+            margin-top: 30px;
+            max-width: 900px;
+        }
+    </style>
+</head>
+
+<body>
+
+<h1>🚀 Stock AI Pro Analyzer</h1>
+
+<input type="text" id="symbol" placeholder="Enter Symbol (IBM / TCS.NSE)">
+<button class="analyzeBtn" onclick="analyze()">Analyze</button>
+
+<div id="result" class="card" style="display:none;"></div>
+
+<div class="card" id="tradePanel" style="display:none;">
+    <h2>Binary Trade Simulator</h2>
+    <h3>Balance: ₹ <span id="balance">1000</span></h3>
+    <button id="upBtn" class="upBtn" onclick="placeTrade('UP')">UP</button>
+    <button id="downBtn" class="downBtn" onclick="placeTrade('DOWN')">DOWN</button>
+    <h3 id="countdown"></h3>
+    <h3 id="tradeResult"></h3>
+</div>
+
+<canvas id="chart"></canvas>
+
+<script>
+
+let currentPrice = 0;
+let tradeStartPrice = 0;
+let balance = 1000;
+let timer = null;
+let autoRefresh = null;
+let lastAISignal = "";
+
+async function analyze() {
+
+    const symbol = document.getElementById("symbol").value.trim();
+
+    if (!symbol) {
+        alert("Enter symbol da 😅");
+        return;
+    }
+
+    const response = await fetch(`/analyze?symbol=${symbol}`);
+    const data = await response.json();
+
+    if (!data.latestPrice || data.latestPrice === 0) {
+        document.getElementById("result").innerHTML =
+            "<h2>No Data / API Limit Hit</h2>";
+        document.getElementById("result").style.display = "block";
+        document.getElementById("tradePanel").style.display = "none";
+        return;
+    }
+
+    currentPrice = data.latestPrice;
+    lastAISignal = data.aiSuggestion;
+
+    let signalColor =
+        data.aiSuggestion === "BUY" ? "#00ff88" :
+        data.aiSuggestion === "SELL" ? "#ff4c4c" :
+        "#ffaa00";
+
+    document.getElementById("result").innerHTML = `
+        <h2>${data.symbol}</h2>
+        <h3>₹ ${data.latestPrice.toFixed(2)}</h3>
+
+        <p>MA20: ${data.ma20.toFixed(2)} | MA50: ${data.ma50.toFixed(2)}</p>
+        <p>RSI: ${data.rsi.toFixed(2)}</p>
+        <p>Trend: ${data.trend}</p>
+
+        <h3 style="color:${signalColor}">
+            🤖 AI Suggestion: ${data.aiSuggestion}
+        </h3>
+
+        <p>Buy Probability: ${data.buyProbability}%</p>
+        <div class="bar">
+            <div class="fillBuy" style="width:${data.buyProbability}%"></div>
+        </div>
+
+        <p style="margin-top:10px;">Sell Probability: ${data.sellProbability}%</p>
+        <div class="bar">
+            <div class="fillSell" style="width:${data.sellProbability}%"></div>
+        </div>
+
+        <p style="margin-top:10px;">Confidence: ${data.confidence}%</p>
+    `;
+
+    document.getElementById("result").style.display = "block";
+    document.getElementById("tradePanel").style.display = "block";
+
+    highlightAI();
+
+    if (window.priceChart instanceof Chart)
+        window.priceChart.destroy();
+
+    const ctx = document.getElementById("chart").getContext("2d");
+
+    window.priceChart = new Chart(ctx, {
+        type: "line",
+        data: {
+            labels: data.priceHistory.map((_, i) => i + 1),
+            datasets: [{
+                label: "Price",
+                data: data.priceHistory,
+                borderColor: "#00ffcc",
+                borderWidth: 2,
+                tension: 0.3
+            }]
+        },
+        options: {
+            plugins: {
+                legend: { labels: { color: "white" } }
+            },
+            scales: {
+                x: { ticks: { color: "white" } },
+                y: { ticks: { color: "white" } }
+            }
+        }
+    });
+
+    startAutoRefresh();
+}
+
+function highlightAI() {
+    document.getElementById("upBtn").style.boxShadow = "none";
+    document.getElementById("downBtn").style.boxShadow = "none";
+
+    if (lastAISignal === "BUY") {
+        document.getElementById("upBtn").style.boxShadow = "0 0 20px #00ff88";
+    } else if (lastAISignal === "SELL") {
+        document.getElementById("downBtn").style.boxShadow = "0 0 20px #ff4c4c";
+    }
+}
+
+function placeTrade(direction) {
+
+    if (!currentPrice) {
+        alert("Analyze first da 😅");
+        return;
+    }
+
+    tradeStartPrice = currentPrice;
+    let seconds = 30;
+
+    document.getElementById("tradeResult").innerText = "";
+
+    if (timer) clearInterval(timer);
+
+    timer = setInterval(async () => {
+
+        seconds--;
+        document.getElementById("countdown").innerText =
+            "Time left: " + seconds + "s";
+
+        if (seconds <= 0) {
+
+            clearInterval(timer);
+
+            const symbol = document.getElementById("symbol").value;
+            const response = await fetch(`/analyze?symbol=${symbol}`);
+            const data = await response.json();
+
+            const finalPrice = data.latestPrice;
+
+            if (
+                (direction === "UP" && finalPrice > tradeStartPrice) ||
+                (direction === "DOWN" && finalPrice < tradeStartPrice)
+            ) {
+                balance += 100;
+                document.getElementById("tradeResult").innerText = "WIN 🎉";
+                document.getElementById("tradeResult").style.color = "#00ff88";
+            } else {
+                balance -= 100;
+                document.getElementById("tradeResult").innerText = "LOSS ❌";
+                document.getElementById("tradeResult").style.color = "#ff4c4c";
+            }
+
+            document.getElementById("balance").innerText = balance;
+        }
+
+    }, 1000);
+}
+
+function startAutoRefresh() {
+    if (autoRefresh)
+        clearInterval(autoRefresh);
+
+    autoRefresh = setInterval(() => {
+        analyze();
+    }, 60000);
+}
+
+</script>
+
+</body>
+</html>
